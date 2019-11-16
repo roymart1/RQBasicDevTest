@@ -1,0 +1,66 @@
+pipeline {
+    agent {
+       node {
+            label 'autotest'
+       }
+    }
+    stages {
+        stage('Pre-build action') {
+            steps {
+                sh 'python --version'
+                withAWS(credentials:'jenkins-autotest-aws-id') {
+                    echo "Authenticating to AWS ECR"
+                    sh("eval \$(aws ecr get-login --no-include-email --region us-east-1 | sed 's|https://||')")
+                    // Remove the code image on the ecr server
+                    sh "docker rmi 772089066251.dkr.ecr.us-east-1.amazonaws.com/rqtabase:latest | true"
+                }
+            }
+        }
+        stage('Get sources') {
+            steps {
+                git branch: 'master',
+                    credentialsId: '9b1cc514-f6fc-498d-82f9-420ef407eaa0',
+                    url: 'ssh://jenkins-robotiq@bitbucket.org/robotiqinc/automatic_testing.git'
+            sh "ls -lat"
+            }
+        }
+        stage('Dockerizing project') {
+            steps {
+                echo 'Building docker images'
+                sh "docker build -f docker_images/DockerfileBase -t rqtabase ."
+            }
+        }
+        stage('Pushing to Amazon ECR') {
+            steps {
+                echo 'Pushing docker images'
+                withAWS(credentials:'jenkins-autotest-aws-id') {
+                    echo "Authenticating to AWS ECR"
+                    sh("eval \$(aws ecr get-login --no-include-email --region us-east-1 | sed 's|https://||')")
+
+                    echo "Taging the image prior to pushing it"
+                    sh "docker tag rqtabase:latest 772089066251.dkr.ecr.us-east-1.amazonaws.com/rqtabase:latest"
+
+                    echo "Pushing the image to ECR"
+                    sh "docker push 772089066251.dkr.ecr.us-east-1.amazonaws.com/rqtabase:latest"
+                }
+            }
+        }
+
+    }
+    post
+    {
+        always
+        {
+            withAWS(credentials:'jenkins-autotest-aws-id') {
+                echo "Authenticating to AWS ECR"
+                sh("eval \$(aws ecr get-login --no-include-email --region us-east-1 | sed 's|https://||')")
+                // Remove the code image on the ecr server
+                sh "docker rmi 772089066251.dkr.ecr.us-east-1.amazonaws.com/rqta:latest | true"
+                // Remove the temporary local image
+                sh "docker rmi rqtabase:latest | true"
+            }
+        }
+    }
+
+}
+
